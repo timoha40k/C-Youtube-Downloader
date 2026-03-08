@@ -8,6 +8,7 @@
 #include <iostream>
 #include <vector>
 #include "json.hpp"
+//#include "convertor.hpp"
 
 // callback to collect response
 size_t write_to_variable(char* ptr, size_t size, size_t nmemb, std::string* data) {
@@ -52,11 +53,10 @@ std::vector<std::string> get_audio_download_url(nlohmann::json& data, size_t ada
     std::vector<std::string> audio_urls;
     for (size_t i = 0; i < adaptiveFormats_size; i++){
         std::string mimeType = data["streamingData"]["adaptiveFormats"][i]["mimeType"];
-        size_t pos = mimeType.find("audio");
-        //if (pos == std::string::npos)
-            //continue;
+        size_t pos = mimeType.find("audio/webm");
+        if (pos == std::string::npos)
+            continue;
         std::string audio_url = data["streamingData"]["adaptiveFormats"][i]["url"];
-        std::cout << audio_url << std::endl;
         audio_urls.push_back(audio_url);
     }
     return audio_urls;
@@ -140,8 +140,9 @@ int main(int argc, char *argv[]) {
     curl_slist_free_all(headers);
 
     curl_easy_reset(curl);
+    
 
-    /*std::ofstream video("video.mp4", std::ios::binary);
+    std::ofstream video("video.mp4", std::ios::binary);
 
     struct curl_slist* download_headers = nullptr;
     download_headers = curl_slist_append(download_headers, "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36");
@@ -163,7 +164,7 @@ int main(int argc, char *argv[]) {
     curl_slist_free_all(download_headers);
 
 
-    video.close();*/
+    video.close();
 
     std::ofstream file("url.txt");
     file << response;
@@ -178,7 +179,7 @@ int main(int argc, char *argv[]) {
     //std::cout << data["streamingData"]["adaptiveFormats"].size() << std::endl;
     std::vector<std::string> audio_urls = std::move(get_audio_download_url(data, data["streamingData"]["adaptiveFormats"].size()));
 
-    std::ofstream audio_file("audio.mp3");
+    std::ofstream audio_file("audio.mp3", std::ios::binary);
     for (auto& url : audio_urls){
         struct curl_slist* audio_headers = nullptr;
         audio_headers = curl_slist_append(audio_headers, "Content-Type: application/json");
@@ -202,7 +203,10 @@ int main(int argc, char *argv[]) {
         } else if (httpCode != 200) {
             std::cerr << "HTTP error: " << httpCode << std::endl;  // will print 403
         } else {
+            std::cout << url << std::endl;
             std::cout << "Success!" << std::endl;
+            curl_slist_free_all(audio_headers);
+            break;
         }
         curl_slist_free_all(audio_headers);
     }
