@@ -8,7 +8,7 @@
 #include <iostream>
 #include <vector>
 #include "json.hpp"
-//#include "convertor.hpp"
+#include "convertor.hpp"
 
 // callback to collect response
 size_t write_to_variable(char* ptr, size_t size, size_t nmemb, std::string* data) {
@@ -53,7 +53,7 @@ std::vector<std::string> get_audio_download_url(nlohmann::json& data, size_t ada
     std::vector<std::string> audio_urls;
     for (size_t i = 0; i < adaptiveFormats_size; i++){
         std::string mimeType = data["streamingData"]["adaptiveFormats"][i]["mimeType"];
-        size_t pos = mimeType.find("audio/webm");
+        size_t pos = mimeType.find("audio/");
         if (pos == std::string::npos)
             continue;
         std::string audio_url = data["streamingData"]["adaptiveFormats"][i]["url"];
@@ -179,6 +179,8 @@ int main(int argc, char *argv[]) {
     //std::cout << data["streamingData"]["adaptiveFormats"].size() << std::endl;
     std::vector<std::string> audio_urls = std::move(get_audio_download_url(data, data["streamingData"]["adaptiveFormats"].size()));
 
+    bool audio_download_success = false;
+
     std::ofstream audio_file("audio.mp3", std::ios::binary);
     for (auto& url : audio_urls){
         struct curl_slist* audio_headers = nullptr;
@@ -195,7 +197,6 @@ int main(int argc, char *argv[]) {
 
         res = curl_easy_perform(curl);
 
-        // check what actually happened
         long httpCode = 0;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
         if (res != CURLE_OK) {
@@ -206,16 +207,20 @@ int main(int argc, char *argv[]) {
             std::cout << url << std::endl;
             std::cout << "Success!" << std::endl;
             curl_slist_free_all(audio_headers);
+            audio_download_success = true;
             break;
         }
         curl_slist_free_all(audio_headers);
     }
 
-
     audio_file.close();
+
+    if (audio_download_success != true)
+        system("ffmpeg -i video.mp4 output.mp3");
+
+
 
     curl_easy_cleanup(curl);
 
     return 0;
-    //У каждой стороні есть две медали кто-то зашифровует ссілки, а ктото находит рабочий клиент ютуба и ему похуя на зашифровку
 }
