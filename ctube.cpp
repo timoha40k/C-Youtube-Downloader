@@ -63,6 +63,12 @@ std::string get_download_url(std::string& player_response){
     return video_url;
 }
 
+std::string get_video_title(std::string& player_response){
+    std::string title;
+    copy_part_string(player_response, title, "\"title\": \"", "\"");
+    return title;
+}
+
 std::string extract_videoId(const char* link){
     std::string videoId = link;
     delete_unnessecary_output(videoId, "https://youtu.be/", "`");
@@ -152,14 +158,17 @@ int main(int argc, char *argv[]) {
     if (res != CURLE_OK)
         std::cerr << "curl error: " << curl_easy_strerror(res) << std::endl;
 
-    std::string video_url = get_download_url(response);
-
     curl_slist_free_all(headers);
 
     curl_easy_reset(curl);
+
+    std::string video_url = get_download_url(response);
+    std::string video_title = get_video_title(response);
     
 
-    std::ofstream video("video.mp4", std::ios::binary);
+    std::string vid_file = video_title;
+    vid_file += ".mp4";
+    std::ofstream video(vid_file, std::ios::binary);
 
     struct curl_slist* download_headers = nullptr;
     download_headers = curl_slist_append(download_headers, "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36");
@@ -198,7 +207,11 @@ int main(int argc, char *argv[]) {
 
     bool audio_download_success = false;
 
-    std::ofstream audio_file("audio.mp3", std::ios::binary);
+    std::string aud_file_name = video_title;
+
+    aud_file_name += ".mp3";
+
+    std::ofstream audio_file(aud_file_name, std::ios::binary);
     for (auto& url : audio_urls){
         struct curl_slist* audio_headers = nullptr;
         audio_headers = curl_slist_append(audio_headers, "Content-Type: application/json");
@@ -232,8 +245,16 @@ int main(int argc, char *argv[]) {
 
     audio_file.close();
 
-    if (audio_download_success != true)
-        system("ffmpeg -i video.mp4 output.mp3");
+    if (audio_download_success != true){
+        std::string ffmpeg_command = "ffmpeg -i '";
+        ffmpeg_command += vid_file;
+        ffmpeg_command += "'";
+        ffmpeg_command += " '";
+        ffmpeg_command += aud_file_name;
+        ffmpeg_command += "'";
+        std::cout << ffmpeg_command << std::endl;
+        system(ffmpeg_command.c_str());
+    }
 
 
 
