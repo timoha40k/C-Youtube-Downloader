@@ -38,8 +38,29 @@ void delete_unnessecary_output(std::string& output, const std::string& first_sub
 
 }
 
-void get_download_url(std::string& video_url){
-    delete_unnessecary_output(video_url, "\"url\": \"", "\"");
+void copy_part_string(const std::string& in_string, std::string& out_string, const std::string& first_sub, const std::string& last_sub){
+    size_t pos_begin = in_string.find(first_sub);
+    if (pos_begin == std::string::npos){
+        std::cerr << "Error: first sub is not found" << std::endl;
+        return;
+    }
+    pos_begin += first_sub.size();//we don't need finding sub in our string
+
+    size_t pos_end = in_string.find(last_sub, pos_begin);
+    if (pos_end == std::string::npos){
+        std::cerr << "Error: last sub not found" << std::endl;
+        return;
+    }
+
+    out_string = in_string.substr(pos_begin, pos_end-pos_begin);
+}
+
+std::string get_download_url(std::string& player_response){
+    //delete_unnessecary_output(player_response, "\"url\": \"", "\"");
+    std::string video_url;
+    copy_part_string(player_response, video_url, "\"url\": \"", "\"");
+
+    return video_url;
 }
 
 std::string extract_videoId(const char* link){
@@ -113,9 +134,6 @@ int main(int argc, char *argv[]) {
     body += videoId;
     body += "\"\n}";
 
-
-    std::cout << body << std::endl;
-
     struct curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/json");
     headers = curl_slist_append(headers, "User-Agent: com.google.android.apps.youtube.vr.oculus/1.71.26 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip");
@@ -134,8 +152,7 @@ int main(int argc, char *argv[]) {
     if (res != CURLE_OK)
         std::cerr << "curl error: " << curl_easy_strerror(res) << std::endl;
 
-    std::string video_url = response;
-    get_download_url(video_url);
+    std::string video_url = get_download_url(response);
 
     curl_slist_free_all(headers);
 
