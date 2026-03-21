@@ -1,9 +1,8 @@
-#include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <curl/curl.h>
 #include <fstream>
 #include <ios>
-#include <iterator>
 #include <string>
 #include <iostream>
 #include <vector>
@@ -140,6 +139,70 @@ void convert_to_audio(std::string& video_name, std::string& audio_name){
     system(ffmpeg_command.c_str());
 }
 
+void cleanup(CURL*& curl){
+    curl_easy_cleanup(curl);
+}
+
+enum Options {smth, download_video_opt, download_audio_opt, download_playlist_opt, help};
+
+void download_video(CURL*& curl, Clients& clients, std::string& link, std::string& video_title){
+    std::string response;
+    CURLcode res;
+
+    std::string body = get_body_to_video(clients, link.c_str());
+
+    struct curl_slist* headers = nullptr;
+    headers_to_player(headers);
+
+    make_ytplayer_request(curl, body, headers, res, response);
+
+    std::ofstream file("url.txt");
+    file << response;
+    file.close();
+
+    std::string video_url = get_download_url(response);
+
+    video_title = get_video_title(response);
+    std::string vid_file_name = video_title;
+    vid_file_name += ".mp4";
+
+    curl_download(curl, res, video_url, vid_file_name);
+}
+
+void download_audio(CURL*& curl, Clients& clients, std::string& link, std::string& video_title){
+    std::string response;
+    CURLcode res;
+
+    download_video(curl, clients, link, video_title);
+
+    std::string vid_file_name = video_title;
+    vid_file_name += ".mp4";
+
+    std::string aud_file_name = video_title;
+    aud_file_name += ".mp3";
+
+    convert_to_audio(vid_file_name, aud_file_name);
+    remove(vid_file_name.c_str());
+}
+
+void process_command(Options option, CURL*& curl, Clients& clients){
+    std::string link, video_title;
+    switch (option) {
+        case download_video_opt:
+            std::cout << "Paste youtube link here:" << std::endl;
+            std::cin >> link;
+            download_video(curl, clients, link, video_title);
+            break;
+        case download_audio_opt:
+            std::cout << "Paste youtube link here:" << std::endl;
+            std::cin >> link;
+            download_audio(curl, clients, link, video_title);
+            break;
+        default:
+            std::cout << "Baka" << std::endl;
+    }
+}
+
 
 int main(int argc, char *argv[]) {
     CURL* curl = curl_easy_init();
@@ -148,7 +211,15 @@ int main(int argc, char *argv[]) {
 
     Clients clients;
 
-    std::string body = get_body_to_video(clients, argv[1]);
+    int option;//generally, needs to be enum Option, but for now it's int because cin doesn't work on enum
+
+    std::cout << "1. Download video\n" << "2. Download audio\n" << "3. Download playlist\n" << "4. Help\n";
+
+    std::cin >> option;
+
+    process_command((Options)option, curl, clients);
+
+    /*std::string body = get_body_to_video(clients, argv[1]);
 
     struct curl_slist* headers = nullptr;
     headers_to_player(headers);
@@ -172,10 +243,10 @@ int main(int argc, char *argv[]) {
 
     aud_file_name += ".mp3";
 
-    convert_to_audio(video_title, aud_file_name);
+    convert_to_audio(video_title, aud_file_name);*/
 
 
-    curl_easy_cleanup(curl);
+    cleanup(curl);
 
     return 0;
 }
