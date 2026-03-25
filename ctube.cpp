@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <curl/curl.h>
@@ -83,6 +84,16 @@ std::string get_body_to_video(Clients& clients, const char* link){
     return body;
 }
 
+std::string get_body_to_playlist(Clients& clients, const char* link){
+    std::string body = clients.clients[0].second;
+    //std::cout << link << std::endl;
+    std::string videoId = extract_videoId(link);
+    body += "  \"playlistId\": \"";
+    body += "PLRDEM91LqLUokd9H6aB3qnl1JYw";
+    body += "\"\n}";
+    return body;
+}
+
 void headers_to_player(curl_slist*& headers){
     headers = curl_slist_append(headers, "Content-Type: application/json");
     headers = curl_slist_append(headers, "User-Agent: com.google.android.apps.youtube.vr.oculus/1.71.26 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip");
@@ -90,7 +101,7 @@ void headers_to_player(curl_slist*& headers){
     headers = curl_slist_append(headers, "X-YouTube-Client-Version: 1.71.26");
 }
 
-void make_ytplayer_request(CURL*& curl, std::string& body, curl_slist*& headers, CURLcode& res, std::string& response){
+void make_ytplayer_request(CURL*& curl, std::string& body, curl_slist*& headers, std::string& response){
     curl_easy_setopt(curl, CURLOPT_URL, "https://www.youtube.com/youtubei/v1/player");
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
@@ -98,7 +109,7 @@ void make_ytplayer_request(CURL*& curl, std::string& body, curl_slist*& headers,
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_to_variable);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
-    res = curl_easy_perform(curl);
+    CURLcode res = curl_easy_perform(curl);
 
     if (res != CURLE_OK)
         std::cerr << "curl error: " << curl_easy_strerror(res) << std::endl;
@@ -108,7 +119,25 @@ void make_ytplayer_request(CURL*& curl, std::string& body, curl_slist*& headers,
     curl_easy_reset(curl);
 }
 
-void curl_download(CURL*& curl, CURLcode& res, std::string& url, std::string& file_name){
+std::string make_yt_request(CURL*& curl, std::string& link){
+    std::string response;
+
+    curl_easy_setopt(curl, CURLOPT_URL, link.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_to_variable);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    //curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+
+    CURLcode res = curl_easy_perform(curl);
+
+    if (res != CURLE_OK)
+        std::cerr << "curl error: " << curl_easy_strerror(res) << std::endl;
+
+    curl_easy_reset(curl);
+
+    return response;
+};
+
+void curl_download(CURL*& curl, std::string& url, std::string& file_name){
     std::ofstream video(file_name, std::ios::binary);
 
 
@@ -117,7 +146,7 @@ void curl_download(CURL*& curl, CURLcode& res, std::string& url, std::string& fi
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &video);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
-    res = curl_easy_perform(curl);
+    CURLcode res = curl_easy_perform(curl);
 
     if (res != CURLE_OK)
         std::cerr << "curl error: " << curl_easy_strerror(res) << std::endl;
@@ -143,18 +172,15 @@ void cleanup(CURL*& curl){
     curl_easy_cleanup(curl);
 }
 
-enum Options {smth, download_video_opt, download_audio_opt, download_playlist_opt, help};
-
 void download_video(CURL*& curl, Clients& clients, std::string& link, std::string& video_title){
     std::string response;
-    CURLcode res;
 
     std::string body = get_body_to_video(clients, link.c_str());
 
     struct curl_slist* headers = nullptr;
     headers_to_player(headers);
 
-    make_ytplayer_request(curl, body, headers, res, response);
+    make_ytplayer_request(curl, body, headers, response);
 
     std::ofstream file("url.txt");
     file << response;
@@ -166,12 +192,11 @@ void download_video(CURL*& curl, Clients& clients, std::string& link, std::strin
     std::string vid_file_name = video_title;
     vid_file_name += ".mp4";
 
-    curl_download(curl, res, video_url, vid_file_name);
+    curl_download(curl, video_url, vid_file_name);
 }
 
 void download_audio(CURL*& curl, Clients& clients, std::string& link, std::string& video_title){
     std::string response;
-    CURLcode res;
 
     download_video(curl, clients, link, video_title);
 
@@ -185,6 +210,75 @@ void download_audio(CURL*& curl, Clients& clients, std::string& link, std::strin
     remove(vid_file_name.c_str());
 }
 
+void parseVideos(const std::string& html) {
+    // Find the ytInitialData blob
+    const std::string marker = "var ytInitialData = ";
+    size_t start = html.find(marker);
+    if (start == std::string::npos) { std::cerr << "ytInitialData not found\n"; return; }
+    start += marker.size();
+
+    int count = 0;
+    size_t pos = start;
+
+    std::vector<std::string> parsed_ids;
+    std::string playlist_id = "Unknown";
+
+    while ((pos = html.find("\"videoId\":\"", pos)) != std::string::npos) {
+        // Extract videoId
+        pos += 11;
+        size_t idEnd = html.find('"', pos);
+        std::string videoId = html.substr(pos, idEnd - pos);
+
+        // Find the title nearby (within next 300 chars)
+        std::string chunk = html.substr(pos, 300);
+        std::string title = "Unknown";
+        size_t tPos = chunk.find("\"title\":{\"runs\":[{\"text\":\"");
+        if (tPos != std::string::npos) {
+            tPos += 25;
+            size_t tEnd = chunk.find('"', tPos);
+            title = chunk.substr(tPos, tEnd - tPos);
+        } else {
+            tPos = chunk.find("\"title\":{\"simpleText\":\"");
+            if (tPos != std::string::npos) {
+                tPos += 22;
+                size_t tEnd = chunk.find('"', tPos);
+                title = chunk.substr(tPos, tEnd - tPos);
+            }
+        }
+        size_t pPos = chunk.find("\"playlistId\":\"");
+        if (pPos != std::string::npos){
+            size_t tEnd = chunk.find('"', tPos + 14);
+            if (playlist_id == "Unknown"){
+                playlist_id = chunk.substr(tPos+28, tEnd - tPos + 20);
+                std::cout << "playlistId: " << playlist_id << std::endl;
+            }
+            std::string temp_playlist_id = chunk.substr(tPos+28, tEnd - tPos + 20);
+            if (playlist_id.compare(temp_playlist_id) == 0){
+                auto it = std::find(parsed_ids.begin(), parsed_ids.end(), videoId);
+                if (it == parsed_ids.end()){
+                    std::cout << ++count << ". " << title << "\n   https://youtube.com/watch?v=" << videoId << "\n";
+                    parsed_ids.push_back(videoId);
+
+                }
+            }
+        }
+        pos = idEnd;
+    }
+}
+
+void download_playlist(CURL*& curl, Clients& clients, std::string& link, std::string& video_title){
+    std::string response;
+    std::string body = get_body_to_playlist(clients, link.c_str());
+    struct curl_slist* headers = nullptr;
+    //headers_to_player(headers);
+    response = make_yt_request(curl, link);
+    parseVideos(response);
+    std::ofstream yt_resp("response.txt");
+    yt_resp << response;
+}
+
+enum Options {smth, download_video_opt, download_audio_opt, download_playlist_opt, help};
+
 void process_command(Options option, CURL*& curl, Clients& clients){
     std::string link, video_title;
     switch (option) {
@@ -197,6 +291,11 @@ void process_command(Options option, CURL*& curl, Clients& clients){
             std::cout << "Paste youtube link here:" << std::endl;
             std::cin >> link;
             download_audio(curl, clients, link, video_title);
+            break;
+        case download_playlist_opt:
+            std::cout << "Paste link to a playlist here:" << std::endl;
+            std::cin >> link;
+            download_playlist(curl, clients, link, video_title);
             break;
         default:
             std::cout << "Baka" << std::endl;
