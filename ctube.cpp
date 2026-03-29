@@ -3,11 +3,14 @@
 #include <cstdio>
 #include <curl/curl.h>
 #include <fstream>
+#include <filesystem>
 #include <ios>
 #include <string>
 #include <iostream>
 #include <vector>
 #include "clients.hpp"
+
+bool g_debug = false;
 // callback to collect response
 size_t write_to_variable(char* ptr, size_t size, size_t nmemb, std::string* data) {
     data->append(ptr, size * nmemb);
@@ -68,9 +71,22 @@ std::string get_video_title(std::string& player_response){
 }
 
 std::string extract_videoId(const char* link){
-    std::string videoId = link;
-    delete_unnessecary_output(videoId, "https://youtu.be/", "`");
-    delete_unnessecary_output(videoId, "watch?v=", "?si=");
+    std::string videoId;
+
+    std::string sub_str = "watch?v=";
+    int pos = static_cast<std::string>(link).find(sub_str);
+    if (pos == std::string::npos){
+        sub_str = "https://youtu.be/";
+        pos = static_cast<std::string>(link).find(sub_str);
+    }
+
+    if (pos != std::string::npos){
+        videoId = static_cast<std::string>(link).substr(pos + sub_str.length(), 11);//videoId lenght = 11
+    }
+
+    if (g_debug){
+        std::cout << "Video ID: " << videoId << std::endl;
+    }
     return videoId;
 }
 
@@ -158,7 +174,7 @@ void curl_download(CURL*& curl, std::string& url, std::string& file_name){
 }
 
 void convert_to_audio(std::string& video_name, std::string& audio_name){
-    std::string ffmpeg_command = "ffmpeg -i '";
+    std::string ffmpeg_command = "ffmpeg -hide_banner -loglevel error -i '";
     ffmpeg_command += video_name;
     ffmpeg_command += "'";
     ffmpeg_command += " '";
@@ -182,14 +198,41 @@ void download_video(CURL*& curl, Clients& clients, std::string& link, std::strin
 
     make_ytplayer_request(curl, body, headers, response);
 
-    std::ofstream file("url.txt");
-    file << response;
-    file.close();
+    if (g_debug){
+        std::ofstream file("url.txt");
+        file << response;
+        file.close();
+    }
 
     std::string video_url = get_download_url(response);
 
     video_title = get_video_title(response);
     std::string vid_file_name = video_title;
+    vid_file_name += ".mp4";
+
+    curl_download(curl, video_url, vid_file_name);
+}
+
+void download_video(CURL*& curl, Clients& clients, std::string& link, std::string& video_title, std::string& dir){
+    std::string response;
+
+    std::string body = get_body_to_video(clients, link.c_str());
+
+    struct curl_slist* headers = nullptr;
+    headers_to_player(headers);
+
+    make_ytplayer_request(curl, body, headers, response);
+
+    if (g_debug){
+        std::ofstream file("url.txt");
+        file << response;
+        file.close();
+    }
+
+    std::string video_url = get_download_url(response);
+
+    video_title = get_video_title(response);
+    std::string vid_file_name = dir + "/" + video_title;
     vid_file_name += ".mp4";
 
     curl_download(curl, video_url, vid_file_name);
@@ -210,7 +253,22 @@ void download_audio(CURL*& curl, Clients& clients, std::string& link, std::strin
     remove(vid_file_name.c_str());
 }
 
-void parseVideos(const std::string& html) {
+void download_audio(CURL*& curl, Clients& clients, std::string& link, std::string& video_title, std::string& dir){
+    std::string response;
+
+    download_video(curl, clients, link, video_title, dir);
+
+    std::string vid_file_name = dir + "/" + video_title;
+    vid_file_name += ".mp4";
+
+    std::string aud_file_name = dir + "/" + video_title;
+    aud_file_name += ".mp3";
+
+    convert_to_audio(vid_file_name, aud_file_name);
+    remove(vid_file_name.c_str());
+}
+
+void parseVideos(const std::string& html, std::vector<std::string>& video_urls) {
     // Find the ytInitialData blob
     const std::string marker = "var ytInitialData = ";
     size_t start = html.find(marker);
@@ -256,8 +314,11 @@ void parseVideos(const std::string& html) {
             if (playlist_id.compare(temp_playlist_id) == 0){
                 auto it = std::find(parsed_ids.begin(), parsed_ids.end(), videoId);
                 if (it == parsed_ids.end()){
+                    std::string url = "https://youtube.com/watch?v=" + videoId;
                     std::cout << ++count << ". " << title << "\n   https://youtube.com/watch?v=" << videoId << "\n";
                     parsed_ids.push_back(videoId);
+
+                    video_urls.push_back(url);
 
                 }
             }
@@ -272,9 +333,46 @@ void download_playlist(CURL*& curl, Clients& clients, std::string& link, std::st
     struct curl_slist* headers = nullptr;
     //headers_to_player(headers);
     response = make_yt_request(curl, link);
-    parseVideos(response);
-    std::ofstream yt_resp("response.txt");
-    yt_resp << response;
+
+    if (g_debug){
+        std::ofstream yt_resp("response.html");
+        yt_resp << response;
+    }
+
+    std::vector<std::string> video_urls;
+    parseVideos(response, video_urls);
+
+    std::string dir_name;
+    std::cout << "Enter playlist name:" << std::endl;
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');//flushleftover
+    std::getline(std::cin, dir_name);
+
+    if (dir_name.empty()) {
+        std::cerr << "Playlist name cannot be empty!" << std::endl;
+        return;
+    }
+
+    std::filesystem::create_directories(dir_name);
+
+    int option;
+    std::cout << "1. Donwload videos" << std::endl;
+    std::cout << "2. Download audios" << std::endl;
+    std::cin >> option;
+
+    if (option != 1 && option != 2){
+        std::cout << "No such option: " << option << std::endl;
+        return;
+    }
+
+    if (option == 2){
+        for (auto& url : video_urls){
+            download_audio(curl, clients, url, video_title, dir_name);
+        }
+    } else if (option == 1){
+        for (auto& url : video_urls){
+            download_video(curl, clients, url, video_title, dir_name);
+        }
+    }
 }
 
 enum Options {smth, download_video_opt, download_audio_opt, download_playlist_opt, help};
@@ -312,9 +410,18 @@ int main(int argc, char *argv[]) {
 
     int option;//generally, needs to be enum Option, but for now it's int because cin doesn't work on enum
 
+    for (int i = 1; i < argc; i++) {
+        if (std::string(argv[i]) == "-d") {
+            g_debug = true;
+            std::cout << "Debug ON" << std::endl;
+            break;
+        }
+    }
+
     std::cout << "1. Download video\n" << "2. Download audio\n" << "3. Download playlist\n" << "4. Help\n";
 
     std::cin >> option;
+
 
     process_command((Options)option, curl, clients);
 
