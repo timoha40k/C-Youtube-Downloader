@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <curl/curl.h>
 #include <fstream>
@@ -37,6 +38,17 @@ void delete_unnessecary_output(std::string& output, const std::string& first_sub
     else
         std::cerr << "Error: last sub not found" << std::endl;
 
+}
+
+void change_special_char(std::string& title){
+    size_t pos = title.find("\'");
+    if (pos == std::string::npos){
+        size_t pos = title.find("\"");
+    }
+    if (pos == std::string::npos){
+        return;
+    }
+    title.insert(pos, "\'\\\'");
 }
 
 void copy_part_string(const std::string& in_string, std::string& out_string, const std::string& first_sub, const std::string& last_sub){
@@ -174,11 +186,15 @@ void curl_download(CURL*& curl, std::string& url, std::string& file_name){
 }
 
 void convert_to_audio(std::string& video_name, std::string& audio_name){
+    std::string video_file = video_name;
+    std::string audio_file = audio_name;
+    change_special_char(video_file);
+    change_special_char(audio_file);
     std::string ffmpeg_command = "ffmpeg -hide_banner -loglevel error -i '";
-    ffmpeg_command += video_name;
+    ffmpeg_command += video_file;
     ffmpeg_command += "'";
     ffmpeg_command += " '";
-    ffmpeg_command += audio_name;
+    ffmpeg_command += audio_file;
     ffmpeg_command += "'";
     std::cout << ffmpeg_command << std::endl;
     system(ffmpeg_command.c_str());
