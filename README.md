@@ -11,4 +11,4 @@ If you get error like: `Couldn't find <curl.curl.h> in include files`, you need 
 `sudo zypper install libcurl-devel`
 ### Usage:
 `./ctube`\
-Then it'll ask you to choose an option. Paste youtube link and it should work.\
+Then it'll ask you to choose an option. Paste youtube link and it should work.
